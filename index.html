@@ -10,6 +10,7 @@
             --accent-color: #18bc9c;
             --bg-color: #f8f9fa;
             --card-bg: #ffffff;
+            --danger-color: #e74c3c;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, "Microsoft JhengHei";
@@ -105,7 +106,16 @@
             font-weight: bold;
         }
         button.btn:hover { opacity: 0.9; }
-        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        button.btn-sm-danger {
+            background-color: var(--danger-color);
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        button.btn-sm-danger:hover { opacity: 0.8; }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -207,7 +217,7 @@
         <div style="overflow-x:auto;">
             <table>
                 <thead>
-                    <tr><th>日期</th><th>名稱</th><th>成本</th><th>抽價</th><th>寄版開套</th><th>利潤</th></tr>
+                    <tr><th>日期</th><th>名稱</th><th>成本</th><th>抽價</th><th>寄版開套</th><th>利潤</th><th>操作</th></tr>
                 </thead>
                 <tbody id="finance-table-body"></tbody>
             </table>
@@ -251,7 +261,7 @@
 </div>
 
 <script>
-    // ⚠️ 這裡必須置換成你在 Google Apps Script 部署得到的網頁應用程式 URL
+    // ⚠️ 請記得在此處更換為你最新的 Google Apps Script 網址 ⚠️
     const API_URL = "https://script.google.com/macros/s/AKfycbxUr2040YxpVL49TBY_JfMSfkGSRxm9qHfOLye4KlrVmh8IPxmN1g5GHXe2_Achs1D6Zg/exec";
 
     let financeData = [];
@@ -262,7 +272,6 @@
         document.getElementById('loading-mask').style.display = show ? 'flex' : 'none';
     }
 
-    // 初始化讀取雲端試算表所有資料
     async function loadAllData() {
         showLoading(true);
         try {
@@ -278,7 +287,7 @@
             renderFinance();
             renderWarehouse();
         } catch (error) {
-            alert("讀取雲端資料失敗，請確認 API_URL 是否設定正確且已正確部署。");
+            alert("讀取雲端資料失敗，請確認 API_URL 設定。");
             console.error(error);
         } finally {
             showLoading(false);
@@ -292,7 +301,7 @@
         event.currentTarget.classList.add('active');
     }
 
-    // 帳務提交至雲端
+    // 帳務提交
     document.getElementById('finance-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         const name = document.getElementById('fin-name').value;
@@ -321,6 +330,24 @@
         }
     });
 
+    // 【新增】刪除單筆帳務紀錄功能
+    async function deleteFinanceRow(rowIndex, name) {
+        if (confirm(`確定要刪除「${name}」這筆帳務紀錄嗎？ (此操作不可逆)`)) {
+            showLoading(true);
+            try {
+                await fetch(API_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "delete_finance", rowIndex: rowIndex })
+                });
+                await loadAllData(); // 重新載入最新資料
+            } catch (err) {
+                alert("刪除失敗");
+            } finally {
+                showLoading(false);
+            }
+        }
+    }
+
     function renderFinance() {
         const tbody = document.getElementById('finance-table-body');
         tbody.innerHTML = '';
@@ -331,9 +358,9 @@
         const currentYearMonth = new Date().toISOString().slice(0, 7);
         document.getElementById('current-month-label').innerText = currentYearMonth;
 
+        // 反轉陣列，讓最新資料顯示在最上面
         [...financeData].reverse().forEach(item => {
             totalProfit += item.profit;
-            // 相容處理雲端回傳日期格式
             const itemDateStr = String(item.date).split('T')[0];
             if (itemDateStr.startsWith(currentYearMonth)) {
                 monthProfit += item.profit;
@@ -347,6 +374,9 @@
                 <td>$${item.price}</td>
                 <td>${item.isConsignment}</td>
                 <td style="color: ${item.profit >= 0 ? 'green' : 'red'}; font-weight:bold;">$${Number(item.profit).toFixed(1)}</td>
+                <td>
+                    <button class="btn-sm-danger" onclick="deleteFinanceRow(${item.rowIndex}, '${item.name}')">刪除</button>
+                </td>
             `;
             tbody.appendChild(tr);
         });
@@ -356,7 +386,7 @@
         document.getElementById('month-profit').innerText = '$' + monthProfit.toFixed(1);
     }
 
-    // 倉儲進貨提交至雲端
+    // 倉儲進貨聯想與登記
     const whNameInput = document.getElementById('wh-name');
     const autocompleteList = document.getElementById('autocomplete-list');
 
@@ -452,7 +482,7 @@
         }
     }
 
-    // 網頁開啟時下載所有最新資料
+    // 初始化下載
     loadAllData();
 </script>
 
