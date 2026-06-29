@@ -349,42 +349,46 @@
     }
 
     function renderFinance() {
-        const tbody = document.getElementById('finance-table-body');
-        tbody.innerHTML = '';
+    const tbody = document.getElementById('finance-table-body');
+    tbody.innerHTML = '';
+    
+    let totalSets = financeData.length;
+    let totalProfit = 0;
+    let monthProfit = 0;
+    const currentYearMonth = new Date().toISOString().slice(0, 7);
+    document.getElementById('current-month-label').innerText = currentYearMonth;
+
+    // 反轉陣列，讓最新資料顯示在最上面
+    [...financeData].reverse().forEach(item => {
+        // 【修正點】強制將利潤轉為數字，若轉換失敗（非數字）則自動視為 0
+        const currentProfit = Number(item.profit) || 0;
         
-        let totalSets = financeData.length;
-        let totalProfit = 0;
-        let monthProfit = 0;
-        const currentYearMonth = new Date().toISOString().slice(0, 7);
-        document.getElementById('current-month-label').innerText = currentYearMonth;
+        totalProfit += currentProfit;
+        const itemDateStr = String(item.date).split('T')[0];
+        if (itemDateStr.startsWith(currentYearMonth)) {
+            monthProfit += currentProfit;
+        }
 
-        // 反轉陣列，讓最新資料顯示在最上面
-        [...financeData].reverse().forEach(item => {
-            totalProfit += item.profit;
-            const itemDateStr = String(item.date).split('T')[0];
-            if (itemDateStr.startsWith(currentYearMonth)) {
-                monthProfit += item.profit;
-            }
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${itemDateStr}</td>
+            <td>${item.name}</td>
+            <td>$${Number(item.cost) || 0}</td>
+            <td>$${Number(item.price) || 0}</td>
+            <td>${item.isConsignment}</td>
+            <td style="color: ${currentProfit >= 0 ? 'green' : 'red'}; font-weight:bold;">$${currentProfit.toFixed(1)}</td>
+            <td>
+                <button class="btn-sm-danger" onclick="deleteFinanceRow(${item.rowIndex}, '${item.name}')">刪除</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
 
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${itemDateStr}</td>
-                <td>${item.name}</td>
-                <td>$${item.cost}</td>
-                <td>$${item.price}</td>
-                <td>${item.isConsignment}</td>
-                <td style="color: ${item.profit >= 0 ? 'green' : 'red'}; font-weight:bold;">$${Number(item.profit).toFixed(1)}</td>
-                <td>
-                    <button class="btn-sm-danger" onclick="deleteFinanceRow(${item.rowIndex}, '${item.name}')">刪除</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-        document.getElementById('total-sets').innerText = totalSets;
-        document.getElementById('total-profit').innerText = '$' + totalProfit.toFixed(1);
-        document.getElementById('month-profit').innerText = '$' + monthProfit.toFixed(1);
-    }
+    // 【修正點】確保在寫入畫面時，統計欄位一定是數字型態
+    document.getElementById('total-sets').innerText = totalSets;
+    document.getElementById('total-profit').innerText = '$' + Number(totalProfit).toFixed(1);
+    document.getElementById('month-profit').innerText = '$' + Number(monthProfit).toFixed(1);
+}
 
     // 倉儲進貨聯想與登記
     const whNameInput = document.getElementById('wh-name');
