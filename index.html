@@ -330,16 +330,26 @@
 </div>
 
 <script>
-    // ⚠️ 請在此處更換為你最新的 Google Apps Script 網址 ⚠️
+    // ⚠️ 請記得在此處更換為你最新的 Google Apps Script 網址 ⚠️
     const API_URL = "https://script.google.com/macros/s/AKfycbxUr2040YxpVL49TBY_JfMSfkGSRxm9qHfOLye4KlrVmh8IPxmN1g5GHXe2_Achs1D6Zg/exec";
 
     let financeData = [];
     let warehouseData = [];
     let productHistoryNames = [];
-    let shipmentData = []; // 【新增】儲存出貨歷史
+    let shipmentData = []; 
     let myChart = null; 
 
-    document.getElementById('fin-date').value = new Date().toISOString().split('T')[0];
+    // 【輔助函式】獲取本地時區的 YYYY-MM-DD 字串
+    function getLocalTodayStr() {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 初始化時採用本地日期字串，防範一打開就顯示昨天
+    document.getElementById('fin-date').value = getLocalTodayStr();
 
     function showLoading(show) {
         document.getElementById('loading-mask').style.display = show ? 'flex' : 'none';
@@ -356,7 +366,7 @@
             financeData = result.finance || [];
             warehouseData = result.warehouse || [];
             productHistoryNames = result.historyNames || [];
-            shipmentData = result.shipment || []; // 【新增】接收後端出貨歷史
+            shipmentData = result.shipment || []; 
             
             buildMonthFilterOptions();
             filterFinanceData(); 
@@ -414,6 +424,12 @@
         renderChart(filtered);
     }
 
+    // 格式化日期顯示（防範後端傳回的 ISO 字串被前端 Date 解析出錯）
+    function formatDateString(dateInput) {
+        if (!dateInput) return '';
+        return String(dateInput).split('T')[0];
+    }
+
     function resetFilters() {
         document.getElementById('filter-month').value = 'all';
         document.getElementById('filter-keyword').value = '';
@@ -425,7 +441,7 @@
         tbody.innerHTML = '';
 
         [...dataList].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(item => {
-            const itemDateStr = String(item.date).split('T')[0];
+            const itemDateStr = formatDateString(item.date);
             const currentProfit = Number(item.profit) || 0;
 
             const tr = document.createElement('tr');
@@ -450,13 +466,13 @@
         let monthProfit = 0;
         let currentFilterProfit = 0;
         
-        const currentYearMonth = new Date().toISOString().slice(0, 7);
+        const currentYearMonth = getLocalTodayStr().slice(0, 7);
         document.getElementById('current-month-label').innerText = currentYearMonth;
 
         financeData.forEach(item => {
             const p = Number(item.profit) || 0;
             totalProfit += p;
-            const itemDateStr = String(item.date).split('T')[0];
+            const itemDateStr = formatDateString(item.date);
             if (itemDateStr.startsWith(currentYearMonth)) {
                 monthProfit += p;
             }
@@ -478,7 +494,7 @@
         
         const dailyProfitMap = {};
         sortedData.forEach(item => {
-            const dateStr = String(item.date).split('T')[0];
+            const dateStr = formatDateString(item.date);
             dailyProfitMap[dateStr] = (dailyProfitMap[dateStr] || 0) + (Number(item.profit) || 0);
         });
 
@@ -509,16 +525,22 @@
         });
     }
 
+    // 帳務提交
     document.getElementById('finance-form').addEventListener('submit', async function(e) {
         e.preventDefault();
-        const date = document.getElementById('fin-date').value;
+        const dateVal = document.getElementById('fin-date').value; // 直接獲取原始文字 "YYYY-MM-DD"
         const name = document.getElementById('fin-name').value;
         const cost = parseFloat(document.getElementById('fin-cost').value);
         const price = parseFloat(document.getElementById('fin-price').value);
         const isConsignment = document.getElementById('fin-is-consignment').value;
         
         let profit = isConsignment === '否' ? (price - cost) : (price - cost) * 0.3;
-        const record = { date, name, cost, price, isConsignment, profit };
+        
+        // 【核心修正】：傳送純文字字串，避開 Date 轉 ISO 時的時區扣減
+        const record = { 
+            date: String(dateVal), 
+            name, cost, price, isConsignment, profit 
+        };
 
         showLoading(true);
         try {
@@ -571,11 +593,11 @@
         const name = whNameInput.value;
         const cost = parseFloat(document.getElementById('wh-cost').value);
         const status = document.getElementById('wh-status').value || '無';
+        const dateStr = getLocalTodayStr(); // 庫存進貨也使用本地時間純文字
 
         const item = {
             id: 'item_' + new Date().getTime(),
-            name, cost, status,
-            date: new Date().toISOString().split('T')[0]
+            name, cost, status, date: dateStr
         };
 
         showLoading(true);
@@ -586,7 +608,6 @@
         } catch (err) { alert("進貨上傳失敗"); } finally { showLoading(false); }
     });
 
-    // 【新增/更新】渲染倉儲系統與統計看板
     function renderWarehouse() {
         const tbody = document.getElementById('warehouse-table-body');
         tbody.innerHTML = '';
@@ -596,13 +617,11 @@
         let monthInCount = 0;
         let monthOutCount = 0;
 
-        const currentYearMonth = new Date().toISOString().slice(0, 7);
-        // 更新倉儲看板上的月份顯示
+        const currentYearMonth = getLocalTodayStr().slice(0, 7);
         document.querySelectorAll('.wh-current-month-label').forEach(el => el.innerText = currentYearMonth);
 
-        // 1. 渲染現有庫存，並統計現有總數、現有總成本、當月進貨數
         warehouseData.forEach(item => {
-            const itemDateStr = String(item.date).split('T')[0];
+            const itemDateStr = formatDateString(item.date);
             totalCost += (Number(item.cost) || 0);
             
             if (itemDateStr.startsWith(currentYearMonth)) {
@@ -620,28 +639,24 @@
             tbody.appendChild(tr);
         });
 
-        // 2. 統計當月出貨數
         shipmentData.forEach(item => {
-            const shipDateStr = String(item.shipDate).split('T')[0];
+            const shipDateStr = formatDateString(item.shipDate);
             if (shipDateStr.startsWith(currentYearMonth)) {
                 monthOutCount++;
             }
         });
 
-        // 更新倉儲儀表板數據
         document.getElementById('wh-total-count').innerText = totalCount;
         document.getElementById('wh-total-cost').innerText = '$' + totalCost.toFixed(0);
         document.getElementById('wh-month-in-count').innerText = monthInCount;
         document.getElementById('wh-month-out-count').innerText = monthOutCount;
 
-        // 3. 渲染出貨歷史紀錄表格
         const shipTbody = document.getElementById('shipment-table-body');
         shipTbody.innerHTML = '';
         
-        // 倒序排列，讓最新出貨的商品顯示在最上方
         [...shipmentData].reverse().forEach(item => {
-            const inDateStr = String(item.date).split('T')[0];
-            const outDateStr = String(item.shipDate).split('T')[0];
+            const inDateStr = formatDateString(item.date);
+            const outDateStr = formatDateString(item.shipDate);
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${item.name}</td>
