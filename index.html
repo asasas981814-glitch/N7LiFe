@@ -243,7 +243,7 @@
                 </div>
                 <div class="input-field">
                     <label>關鍵字搜尋 (商品名稱)</label>
-                    <input type="text" id="filter-keyword" placeholder="輸入關鍵字，如：枕頭..." oninput="filterFinanceData()">
+                    <input type="text" id="filter-keyword" placeholder="輸入關鍵字..." oninput="filterFinanceData()">
                 </div>
                 <button class="btn" onclick="resetFilters()" style="background-color: #95a5a6;">重置篩選</button>
             </div>
@@ -339,7 +339,27 @@
     let shipmentData = []; 
     let myChart = null; 
 
-    // 【輔助函式】獲取本地時區的 YYYY-MM-DD 字串
+    // 【核心修正：精準的日期格式化防錯】直接處理並還原時區造成的「少一天」
+    function formatDateString(dateInput) {
+        if (!dateInput) return '';
+        let dateStr = String(dateInput);
+        
+        // 如果帶有 T，代表是 ISO 時間格式，會因為時區少一天，必須做時區修正
+        if (dateStr.includes('T')) {
+            let d = new Date(dateStr);
+            if (!isNaN(d.getTime())) {
+                // 強制加上本地時區偏移，確保還原成試算表內的正確日期
+                d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+                let yyyy = d.getFullYear();
+                let mm = String(d.getMonth() + 1).padStart(2, '0');
+                let dd = String(d.getDate()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd}`;
+            }
+        }
+        // 如果原本就是 yyyy-mm-dd 的純字串形式，直接回傳
+        return dateStr.split(' ')[0];
+    }
+
     function getLocalTodayStr() {
         const today = new Date();
         const yyyy = today.getFullYear();
@@ -348,7 +368,6 @@
         return `${yyyy}-${mm}-${dd}`;
     }
 
-    // 初始化時採用本地日期字串，防範一打開就顯示昨天
     document.getElementById('fin-date').value = getLocalTodayStr();
 
     function showLoading(show) {
@@ -383,7 +402,7 @@
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
         document.getElementById(tabId).classList.add('active');
-        event.currentTarget.classList.add('active');
+        if(event) event.currentTarget.classList.add('active');
     }
 
     function buildMonthFilterOptions() {
@@ -393,7 +412,7 @@
         
         const months = [];
         financeData.forEach(item => {
-            const ym = String(item.date).split('T')[0].slice(0, 7);
+            const ym = formatDateString(item.date).slice(0, 7);
             if (ym && !months.includes(ym) && ym.length === 7) {
                 months.push(ym);
             }
@@ -413,7 +432,7 @@
         const keyword = document.getElementById('filter-keyword').value.trim().toLowerCase();
         
         const filtered = financeData.filter(item => {
-            const itemDateStr = String(item.date).split('T')[0];
+            const itemDateStr = formatDateString(item.date);
             const matchMonth = (targetMonth === 'all') || itemDateStr.startsWith(targetMonth);
             const matchKeyword = !keyword || String(item.name).toLowerCase().includes(keyword);
             return matchMonth && matchKeyword;
@@ -422,12 +441,6 @@
         renderFinanceTable(filtered);
         updateDashboardMetrics(filtered);
         renderChart(filtered);
-    }
-
-    // 格式化日期顯示（防範後端傳回的 ISO 字串被前端 Date 解析出錯）
-    function formatDateString(dateInput) {
-        if (!dateInput) return '';
-        return String(dateInput).split('T')[0];
     }
 
     function resetFilters() {
@@ -440,16 +453,19 @@
         const tbody = document.getElementById('finance-table-body');
         tbody.innerHTML = '';
 
-        [...dataList].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(item => {
+        [...dataList].sort((a,b) => new Date(formatDateString(b.date)) - new Date(formatDateString(a.date))).forEach(item => {
             const itemDateStr = formatDateString(item.date);
-            const currentProfit = Number(item.profit) || 0;
+            // 【核心修正：防範非純數字內容】
+            const currentProfit = Number(String(item.profit).replace(/[^0-9.-]/g, '')) || 0;
+            const currentCost = Number(String(item.cost).replace(/[^0-9.-]/g, '')) || 0;
+            const currentPrice = Number(String(item.price).replace(/[^0-9.-]/g, '')) || 0;
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${itemDateStr}</td>
                 <td>${item.name}</td>
-                <td>$${Number(item.cost) || 0}</td>
-                <td>$${Number(item.price) || 0}</td>
+                <td>$${currentCost}</td>
+                <td>$${currentPrice}</td>
                 <td>${item.isConsignment}</td>
                 <td style="color: ${currentProfit >= 0 ? 'green' : 'red'}; font-weight:bold;">$${currentProfit.toFixed(1)}</td>
                 <td>
@@ -470,7 +486,7 @@
         document.getElementById('current-month-label').innerText = currentYearMonth;
 
         financeData.forEach(item => {
-            const p = Number(item.profit) || 0;
+            const p = Number(String(item.profit).replace(/[^0-9.-]/g, '')) || 0;
             totalProfit += p;
             const itemDateStr = formatDateString(item.date);
             if (itemDateStr.startsWith(currentYearMonth)) {
@@ -479,7 +495,7 @@
         });
 
         filteredList.forEach(item => {
-            currentFilterProfit += (Number(item.profit) || 0);
+            currentFilterProfit += (Number(String(item.profit).replace(/[^0-9.-]/g, '')) || 0);
         });
 
         document.getElementById('total-sets').innerText = totalSets;
@@ -490,12 +506,13 @@
 
     function renderChart(dataList) {
         const ctx = document.getElementById('profitChart').getContext('2d');
-        const sortedData = [...dataList].sort((a, b) => new Date(a.date) - new Date(b.date));
+        const sortedData = [...dataList].sort((a, b) => new Date(formatDateString(a.date)) - new Date(formatDateString(b.date)));
         
         const dailyProfitMap = {};
         sortedData.forEach(item => {
             const dateStr = formatDateString(item.date);
-            dailyProfitMap[dateStr] = (dailyProfitMap[dateStr] || 0) + (Number(item.profit) || 0);
+            const p = Number(String(item.profit).replace(/[^0-9.-]/g, '')) || 0;
+            dailyProfitMap[dateStr] = (dailyProfitMap[dateStr] || 0) + p;
         });
 
         const labels = Object.keys(dailyProfitMap);
@@ -525,10 +542,9 @@
         });
     }
 
-    // 帳務提交
     document.getElementById('finance-form').addEventListener('submit', async function(e) {
         e.preventDefault();
-        const dateVal = document.getElementById('fin-date').value; // 直接獲取原始文字 "YYYY-MM-DD"
+        const dateVal = document.getElementById('fin-date').value; 
         const name = document.getElementById('fin-name').value;
         const cost = parseFloat(document.getElementById('fin-cost').value);
         const price = parseFloat(document.getElementById('fin-price').value);
@@ -536,7 +552,6 @@
         
         let profit = isConsignment === '否' ? (price - cost) : (price - cost) * 0.3;
         
-        // 【核心修正】：傳送純文字字串，避開 Date 轉 ISO 時的時區扣減
         const record = { 
             date: String(dateVal), 
             name, cost, price, isConsignment, profit 
@@ -562,7 +577,6 @@
         }
     }
 
-    // 倉儲管理
     const whNameInput = document.getElementById('wh-name');
     const autocompleteList = document.getElementById('autocomplete-list');
 
@@ -593,7 +607,7 @@
         const name = whNameInput.value;
         const cost = parseFloat(document.getElementById('wh-cost').value);
         const status = document.getElementById('wh-status').value || '無';
-        const dateStr = getLocalTodayStr(); // 庫存進貨也使用本地時間純文字
+        const dateStr = getLocalTodayStr(); 
 
         const item = {
             id: 'item_' + new Date().getTime(),
@@ -622,7 +636,8 @@
 
         warehouseData.forEach(item => {
             const itemDateStr = formatDateString(item.date);
-            totalCost += (Number(item.cost) || 0);
+            const itemCost = Number(String(item.cost).replace(/[^0-9.-]/g, '')) || 0;
+            totalCost += itemCost;
             
             if (itemDateStr.startsWith(currentYearMonth)) {
                 monthInCount++;
@@ -632,7 +647,7 @@
             tr.innerHTML = `
                 <td><input type="checkbox" class="ship-checkbox" value="${item.id}" data-row="${item.rowIndex}"></td>
                 <td>${item.name}</td>
-                <td>$${item.cost}</td>
+                <td>$${itemCost}</td>
                 <td>${item.status}</td>
                 <td>${itemDateStr}</td>
             `;
@@ -657,10 +672,11 @@
         [...shipmentData].reverse().forEach(item => {
             const inDateStr = formatDateString(item.date);
             const outDateStr = formatDateString(item.shipDate);
+            const itemCost = Number(String(item.cost).replace(/[^0-9.-]/g, '')) || 0;
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${item.name}</td>
-                <td>$${item.cost}</td>
+                <td>$${itemCost}</td>
                 <td>${item.status}</td>
                 <td>${inDateStr}</td>
                 <td style="color: var(--danger-color); font-weight:bold;">${outDateStr}</td>
