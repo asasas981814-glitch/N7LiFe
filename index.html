@@ -13,6 +13,7 @@
             --card-bg: #ffffff;
             --danger-color: #e74c3c;
             --info-color: #3498db;
+            --warning-color: #f39c12;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, "Microsoft JhengHei";
@@ -264,6 +265,25 @@
     </div>
 
     <div id="warehouse-tab" class="tab-content">
+        <div class="dashboard">
+            <div class="card" style="border-top: 4px solid var(--primary-color);">
+                <h3>現有商品總數</h3>
+                <div class="value" id="wh-total-count">0</div>
+            </div>
+            <div class="card" style="border-top: 4px solid var(--warning-color);">
+                <h3>現有庫存總成本</h3>
+                <div class="value" id="wh-total-cost">$0</div>
+            </div>
+            <div class="card" style="border-top: 4px solid var(--accent-color);">
+                <h3>當月進貨數量 (<span class="wh-current-month-label"></span>)</h3>
+                <div class="value" id="wh-month-in-count">0</div>
+            </div>
+            <div class="card" style="border-top: 4px solid var(--danger-color);">
+                <h3>當月出貨數量 (<span class="wh-current-month-label"></span>)</h3>
+                <div class="value" id="wh-month-out-count">0</div>
+            </div>
+        </div>
+
         <h2>進貨登記</h2>
         <div class="form-group">
             <form id="warehouse-form" class="form-row">
@@ -296,19 +316,29 @@
                 <tbody id="warehouse-table-body"></tbody>
             </table>
         </div>
+
+        <h2 style="margin-top: 40px; color: #7f8c8d;">已出貨商品歷史紀錄</h2>
+        <div style="overflow-x:auto;">
+            <table style="background-color: #f1f2f6;">
+                <thead>
+                    <tr style="background-color: #7f8c8d;"><th>貨品名稱</th><th>原進貨成本</th><th>商品狀況</th><th>進貨時間</th><th>出貨時間</th></tr>
+                </thead>
+                <tbody id="shipment-table-body" style="color: #555;"></tbody>
+            </table>
+        </div>
     </div>
 </div>
 
 <script>
-    // ⚠️ 請記得在此處更換為你最新的 Google Apps Script 網址 ⚠️
+    // ⚠️ 請在此處更換為你最新的 Google Apps Script 網址 ⚠️
     const API_URL = "https://script.google.com/macros/s/AKfycbxUr2040YxpVL49TBY_JfMSfkGSRxm9qHfOLye4KlrVmh8IPxmN1g5GHXe2_Achs1D6Zg/exec";
 
     let financeData = [];
     let warehouseData = [];
     let productHistoryNames = [];
-    let myChart = null; // 儲存 Chart 實例
+    let shipmentData = []; // 【新增】儲存出貨歷史
+    let myChart = null; 
 
-    // 頁面載入時預設當天日期到新增帳務欄位
     document.getElementById('fin-date').value = new Date().toISOString().split('T')[0];
 
     function showLoading(show) {
@@ -326,12 +356,13 @@
             financeData = result.finance || [];
             warehouseData = result.warehouse || [];
             productHistoryNames = result.historyNames || [];
+            shipmentData = result.shipment || []; // 【新增】接收後端出貨歷史
             
             buildMonthFilterOptions();
-            filterFinanceData(); // 此處會自動渲染帳務表格與圖表
+            filterFinanceData(); 
             renderWarehouse();
         } catch (error) {
-            alert("讀取雲端資料失敗，請確認 API_URL 設定且已正確部署為所有人。");
+            alert("讀取雲端資料失敗，請確認 API_URL 設定且已正確部署。");
             console.error(error);
         } finally {
             showLoading(false);
@@ -345,13 +376,11 @@
         event.currentTarget.classList.add('active');
     }
 
-    // 建立月份篩選下拉選單的選項
     function buildMonthFilterOptions() {
         const monthSelect = document.getElementById('filter-month');
-        const savedValue = monthSelect.value; // 保留當前選取的月份狀態
+        const savedValue = monthSelect.value; 
         monthSelect.innerHTML = '<option value="all">顯示全部月份</option>';
         
-        // 抽出所有不重複的年月 YYYY-MM
         const months = [];
         financeData.forEach(item => {
             const ym = String(item.date).split('T')[0].slice(0, 7);
@@ -359,7 +388,6 @@
                 months.push(ym);
             }
         });
-        // 排序，新的月份在前面
         months.sort().reverse();
         months.forEach(m => {
             const opt = document.createElement('option');
@@ -367,16 +395,13 @@
             opt.innerText = m;
             monthSelect.appendChild(opt);
         });
-        
         if (savedValue) monthSelect.value = savedValue;
     }
 
-    // 【新增】綜合篩選功能（月份 + 關鍵字）與趨勢圖生成
     function filterFinanceData() {
         const targetMonth = document.getElementById('filter-month').value;
         const keyword = document.getElementById('filter-keyword').value.trim().toLowerCase();
         
-        // 進行過濾
         const filtered = financeData.filter(item => {
             const itemDateStr = String(item.date).split('T')[0];
             const matchMonth = (targetMonth === 'all') || itemDateStr.startsWith(targetMonth);
@@ -395,12 +420,10 @@
         filterFinanceData();
     }
 
-    // 渲染帳務表格 (吃篩選後的資料)
     function renderFinanceTable(dataList) {
         const tbody = document.getElementById('finance-table-body');
         tbody.innerHTML = '';
 
-        // 倒序排列，讓最新日期的資料呈現在上方
         [...dataList].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(item => {
             const itemDateStr = String(item.date).split('T')[0];
             const currentProfit = Number(item.profit) || 0;
@@ -421,7 +444,6 @@
         });
     }
 
-    // 更新儀表板統計數據
     function updateDashboardMetrics(filteredList) {
         let totalSets = financeData.length;
         let totalProfit = 0;
@@ -450,14 +472,10 @@
         document.getElementById('filter-profit').innerText = '$' + currentFilterProfit.toFixed(1);
     }
 
-    // 【新增】繪製折線圖趨勢
     function renderChart(dataList) {
         const ctx = document.getElementById('profitChart').getContext('2d');
-        
-        // 將資料按日期由舊到新排序，方便折線圖繪製趨勢
         const sortedData = [...dataList].sort((a, b) => new Date(a.date) - new Date(b.date));
         
-        // 依群組統計每日利潤
         const dailyProfitMap = {};
         sortedData.forEach(item => {
             const dateStr = String(item.date).split('T')[0];
@@ -467,9 +485,7 @@
         const labels = Object.keys(dailyProfitMap);
         const profits = Object.values(dailyProfitMap);
 
-        if (myChart) {
-            myChart.destroy(); // 銷毀舊圖表才能重繪
-        }
+        if (myChart) { myChart.destroy(); }
 
         myChart = new Chart(ctx, {
             type: 'line',
@@ -488,14 +504,11 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true }
-                }
+                scales: { y: { beginAtZero: true } }
             }
         });
     }
 
-    // 帳務提交
     document.getElementById('finance-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         const date = document.getElementById('fin-date').value;
@@ -509,41 +522,25 @@
 
         showLoading(true);
         try {
-            await fetch(API_URL, {
-                method: "POST",
-                body: JSON.stringify({ action: "add_finance", data: record })
-            });
-            // 提交後保留日期，重置其餘欄位
+            await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "add_finance", data: record }) });
             document.getElementById('fin-name').value = '';
             document.getElementById('fin-cost').value = '';
             document.getElementById('fin-price').value = '';
             await loadAllData();
-        } catch (err) {
-            alert("上傳帳務失敗");
-        } finally {
-            showLoading(false);
-        }
+        } catch (err) { alert("上傳帳務失敗"); } finally { showLoading(false); }
     });
 
-    // 刪除單筆帳務
     async function deleteFinanceRow(rowIndex, name) {
         if (confirm(`確定要刪除「${name}」這筆帳務紀錄嗎？`)) {
             showLoading(true);
             try {
-                await fetch(API_URL, {
-                    method: "POST",
-                    body: JSON.stringify({ action: "delete_finance", rowIndex: rowIndex })
-                });
+                await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "delete_finance", rowIndex: rowIndex }) });
                 await loadAllData();
-            } catch (err) {
-                alert("刪除失敗");
-            } finally {
-                showLoading(false);
-            }
+            } catch (err) { alert("刪除失敗"); } finally { showLoading(false); }
         }
     }
 
-    // 倉儲管理區塊
+    // 倉儲管理
     const whNameInput = document.getElementById('wh-name');
     const autocompleteList = document.getElementById('autocomplete-list');
 
@@ -583,27 +580,36 @@
 
         showLoading(true);
         try {
-            await fetch(API_URL, {
-                method: "POST",
-                body: JSON.stringify({ action: "add_warehouse", data: item })
-            });
+            await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "add_warehouse", data: item }) });
             this.reset();
             await loadAllData();
-        } catch (err) {
-            alert("進貨上傳失敗");
-        } finally {
-            showLoading(false);
-        }
+        } catch (err) { alert("進貨上傳失敗"); } finally { showLoading(false); }
     });
 
+    // 【新增/更新】渲染倉儲系統與統計看板
     function renderWarehouse() {
         const tbody = document.getElementById('warehouse-table-body');
         tbody.innerHTML = '';
 
+        let totalCount = warehouseData.length;
+        let totalCost = 0;
+        let monthInCount = 0;
+        let monthOutCount = 0;
+
+        const currentYearMonth = new Date().toISOString().slice(0, 7);
+        // 更新倉儲看板上的月份顯示
+        document.querySelectorAll('.wh-current-month-label').forEach(el => el.innerText = currentYearMonth);
+
+        // 1. 渲染現有庫存，並統計現有總數、現有總成本、當月進貨數
         warehouseData.forEach(item => {
             const itemDateStr = String(item.date).split('T')[0];
+            totalCost += (Number(item.cost) || 0);
+            
+            if (itemDateStr.startsWith(currentYearMonth)) {
+                monthInCount++;
+            }
+
             const tr = document.createElement('tr');
-            // 【Bug 修正關鍵】：將當前資料行在 Google 試算表中精確的 rowIndex 綁定在屬性 data-row 上
             tr.innerHTML = `
                 <td><input type="checkbox" class="ship-checkbox" value="${item.id}" data-row="${item.rowIndex}"></td>
                 <td>${item.name}</td>
@@ -613,9 +619,41 @@
             `;
             tbody.appendChild(tr);
         });
+
+        // 2. 統計當月出貨數
+        shipmentData.forEach(item => {
+            const shipDateStr = String(item.shipDate).split('T')[0];
+            if (shipDateStr.startsWith(currentYearMonth)) {
+                monthOutCount++;
+            }
+        });
+
+        // 更新倉儲儀表板數據
+        document.getElementById('wh-total-count').innerText = totalCount;
+        document.getElementById('wh-total-cost').innerText = '$' + totalCost.toFixed(0);
+        document.getElementById('wh-month-in-count').innerText = monthInCount;
+        document.getElementById('wh-month-out-count').innerText = monthOutCount;
+
+        // 3. 渲染出貨歷史紀錄表格
+        const shipTbody = document.getElementById('shipment-table-body');
+        shipTbody.innerHTML = '';
+        
+        // 倒序排列，讓最新出貨的商品顯示在最上方
+        [...shipmentData].reverse().forEach(item => {
+            const inDateStr = String(item.date).split('T')[0];
+            const outDateStr = String(item.shipDate).split('T')[0];
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${item.name}</td>
+                <td>$${item.cost}</td>
+                <td>${item.status}</td>
+                <td>${inDateStr}</td>
+                <td style="color: var(--danger-color); font-weight:bold;">${outDateStr}</td>
+            `;
+            shipTbody.appendChild(tr);
+        });
     }
 
-    // 【Debug 修正完成】雲端批次同步出貨
     async function shipSelected() {
         const checkboxes = document.querySelectorAll('.ship-checkbox:checked');
         if (checkboxes.length === 0) {
@@ -624,26 +662,19 @@
         }
 
         if (confirm(`確定要將這 ${checkboxes.length} 項商品出貨嗎？`)) {
-            // 精準抓取被勾選商品在 Google 試算表對應的真正的行號 (RowIndex)
             const rowsToShip = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-row'), 10));
             
             showLoading(true);
             try {
-                // 發送至後端專門處理行刪除的 action
-                const response = await fetch(API_URL, {
+                await fetch(API_URL, {
                     method: "POST",
                     body: JSON.stringify({ action: "ship_warehouse_by_rows", rowIndexes: rowsToShip })
                 });
                 await loadAllData();
-            } catch (err) {
-                alert("出貨更新失敗");
-            } finally {
-                showLoading(false);
-            }
+            } catch (err) { alert("出貨更新失敗"); } finally { showLoading(false); }
         }
     }
 
-    // 初始化讀取
     loadAllData();
 </script>
 
