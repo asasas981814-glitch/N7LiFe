@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>N7 整合倉儲與帳務雲端管理系統</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary-color: #2c3e50;
@@ -11,6 +12,7 @@
             --bg-color: #f8f9fa;
             --card-bg: #ffffff;
             --danger-color: #e74c3c;
+            --info-color: #3498db;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, "Microsoft JhengHei";
@@ -23,7 +25,7 @@
             max-width: 1200px;
             margin: 0 auto;
         }
-        h1, h2 {
+        h1, h2, h3 {
             color: var(--primary-color);
         }
         .tabs {
@@ -52,7 +54,7 @@
         }
         .dashboard {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
         }
@@ -64,15 +66,15 @@
             text-align: center;
         }
         .card h3 { margin: 0 0 10px 0; color: #7f8c8d; font-size: 16px; }
-        .card .value { font-size: 28px; font-weight: bold; color: var(--primary-color); }
-        .form-group {
+        .card .value { font-size: 26px; font-weight: bold; color: var(--primary-color); }
+        .form-group, .filter-group {
             background: var(--card-bg);
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             margin-bottom: 20px;
         }
-        .form-row {
+        .form-row, .filter-row {
             display: flex;
             flex-wrap: wrap;
             gap: 15px;
@@ -80,7 +82,7 @@
         }
         .input-field {
             flex: 1;
-            min-width: 180px;
+            min-width: 160px;
             position: relative;
         }
         .input-field label {
@@ -116,6 +118,14 @@
             font-size: 12px;
         }
         button.btn-sm-danger:hover { opacity: 0.8; }
+        .chart-container {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            max-height: 400px;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -185,11 +195,19 @@
                 <h3>當月利潤 (<span id="current-month-label"></span>)</h3>
                 <div class="value" id="month-profit">$0</div>
             </div>
+            <div class="card" style="border-left: 5px solid var(--info-color);">
+                <h3>篩選條件下總利潤</h3>
+                <div class="value" id="filter-profit" style="color: var(--info-color);">$0</div>
+            </div>
         </div>
 
         <h2>新增帳務資料</h2>
         <div class="form-group">
             <form id="finance-form" class="form-row">
+                <div class="input-field">
+                    <label>選擇日期</label>
+                    <input type="date" id="fin-date" required>
+                </div>
                 <div class="input-field">
                     <label>一套名稱</label>
                     <input type="text" id="fin-name" required placeholder="例如：一番賞 航海王">
@@ -211,6 +229,27 @@
                 </div>
                 <button type="submit" class="btn" id="fin-submit-btn">記錄資料</button>
             </form>
+        </div>
+
+        <h2>歷史紀錄查詢與趨勢分析</h2>
+        <div class="filter-group">
+            <div class="filter-row">
+                <div class="input-field">
+                    <label>按月份篩選</label>
+                    <select id="filter-month" onchange="filterFinanceData()">
+                        <option value="all">顯示全部月份</option>
+                    </select>
+                </div>
+                <div class="input-field">
+                    <label>關鍵字搜尋 (商品名稱)</label>
+                    <input type="text" id="filter-keyword" placeholder="輸入關鍵字，如：枕頭..." oninput="filterFinanceData()">
+                </div>
+                <button class="btn" onclick="resetFilters()" style="background-color: #95a5a6;">重置篩選</button>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="profitChart"></canvas>
         </div>
 
         <h2>帳務歷史紀錄</h2>
@@ -267,6 +306,10 @@
     let financeData = [];
     let warehouseData = [];
     let productHistoryNames = [];
+    let myChart = null; // 儲存 Chart 實例
+
+    // 頁面載入時預設當天日期到新增帳務欄位
+    document.getElementById('fin-date').value = new Date().toISOString().split('T')[0];
 
     function showLoading(show) {
         document.getElementById('loading-mask').style.display = show ? 'flex' : 'none';
@@ -284,10 +327,11 @@
             warehouseData = result.warehouse || [];
             productHistoryNames = result.historyNames || [];
             
-            renderFinance();
+            buildMonthFilterOptions();
+            filterFinanceData(); // 此處會自動渲染帳務表格與圖表
             renderWarehouse();
         } catch (error) {
-            alert("讀取雲端資料失敗，請確認 API_URL 設定。");
+            alert("讀取雲端資料失敗，請確認 API_URL 設定且已正確部署為所有人。");
             console.error(error);
         } finally {
             showLoading(false);
@@ -301,19 +345,167 @@
         event.currentTarget.classList.add('active');
     }
 
+    // 建立月份篩選下拉選單的選項
+    function buildMonthFilterOptions() {
+        const monthSelect = document.getElementById('filter-month');
+        const savedValue = monthSelect.value; // 保留當前選取的月份狀態
+        monthSelect.innerHTML = '<option value="all">顯示全部月份</option>';
+        
+        // 抽出所有不重複的年月 YYYY-MM
+        const months = [];
+        financeData.forEach(item => {
+            const ym = String(item.date).split('T')[0].slice(0, 7);
+            if (ym && !months.includes(ym) && ym.length === 7) {
+                months.push(ym);
+            }
+        });
+        // 排序，新的月份在前面
+        months.sort().reverse();
+        months.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.innerText = m;
+            monthSelect.appendChild(opt);
+        });
+        
+        if (savedValue) monthSelect.value = savedValue;
+    }
+
+    // 【新增】綜合篩選功能（月份 + 關鍵字）與趨勢圖生成
+    function filterFinanceData() {
+        const targetMonth = document.getElementById('filter-month').value;
+        const keyword = document.getElementById('filter-keyword').value.trim().toLowerCase();
+        
+        // 進行過濾
+        const filtered = financeData.filter(item => {
+            const itemDateStr = String(item.date).split('T')[0];
+            const matchMonth = (targetMonth === 'all') || itemDateStr.startsWith(targetMonth);
+            const matchKeyword = !keyword || String(item.name).toLowerCase().includes(keyword);
+            return matchMonth && matchKeyword;
+        });
+
+        renderFinanceTable(filtered);
+        updateDashboardMetrics(filtered);
+        renderChart(filtered);
+    }
+
+    function resetFilters() {
+        document.getElementById('filter-month').value = 'all';
+        document.getElementById('filter-keyword').value = '';
+        filterFinanceData();
+    }
+
+    // 渲染帳務表格 (吃篩選後的資料)
+    function renderFinanceTable(dataList) {
+        const tbody = document.getElementById('finance-table-body');
+        tbody.innerHTML = '';
+
+        // 倒序排列，讓最新日期的資料呈現在上方
+        [...dataList].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(item => {
+            const itemDateStr = String(item.date).split('T')[0];
+            const currentProfit = Number(item.profit) || 0;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${itemDateStr}</td>
+                <td>${item.name}</td>
+                <td>$${Number(item.cost) || 0}</td>
+                <td>$${Number(item.price) || 0}</td>
+                <td>${item.isConsignment}</td>
+                <td style="color: ${currentProfit >= 0 ? 'green' : 'red'}; font-weight:bold;">$${currentProfit.toFixed(1)}</td>
+                <td>
+                    <button class="btn-sm-danger" onclick="deleteFinanceRow(${item.rowIndex}, '${item.name}')">刪除</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // 更新儀表板統計數據
+    function updateDashboardMetrics(filteredList) {
+        let totalSets = financeData.length;
+        let totalProfit = 0;
+        let monthProfit = 0;
+        let currentFilterProfit = 0;
+        
+        const currentYearMonth = new Date().toISOString().slice(0, 7);
+        document.getElementById('current-month-label').innerText = currentYearMonth;
+
+        financeData.forEach(item => {
+            const p = Number(item.profit) || 0;
+            totalProfit += p;
+            const itemDateStr = String(item.date).split('T')[0];
+            if (itemDateStr.startsWith(currentYearMonth)) {
+                monthProfit += p;
+            }
+        });
+
+        filteredList.forEach(item => {
+            currentFilterProfit += (Number(item.profit) || 0);
+        });
+
+        document.getElementById('total-sets').innerText = totalSets;
+        document.getElementById('total-profit').innerText = '$' + totalProfit.toFixed(1);
+        document.getElementById('month-profit').innerText = '$' + monthProfit.toFixed(1);
+        document.getElementById('filter-profit').innerText = '$' + currentFilterProfit.toFixed(1);
+    }
+
+    // 【新增】繪製折線圖趨勢
+    function renderChart(dataList) {
+        const ctx = document.getElementById('profitChart').getContext('2d');
+        
+        // 將資料按日期由舊到新排序，方便折線圖繪製趨勢
+        const sortedData = [...dataList].sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        // 依群組統計每日利潤
+        const dailyProfitMap = {};
+        sortedData.forEach(item => {
+            const dateStr = String(item.date).split('T')[0];
+            dailyProfitMap[dateStr] = (dailyProfitMap[dateStr] || 0) + (Number(item.profit) || 0);
+        });
+
+        const labels = Object.keys(dailyProfitMap);
+        const profits = Object.values(dailyProfitMap);
+
+        if (myChart) {
+            myChart.destroy(); // 銷毀舊圖表才能重繪
+        }
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '每日累計利潤變動趨勢',
+                    data: profits,
+                    borderColor: '#18bc9c',
+                    backgroundColor: 'rgba(24, 188, 156, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+
     // 帳務提交
     document.getElementById('finance-form').addEventListener('submit', async function(e) {
         e.preventDefault();
+        const date = document.getElementById('fin-date').value;
         const name = document.getElementById('fin-name').value;
         const cost = parseFloat(document.getElementById('fin-cost').value);
         const price = parseFloat(document.getElementById('fin-price').value);
         const isConsignment = document.getElementById('fin-is-consignment').value;
         
         let profit = isConsignment === '否' ? (price - cost) : (price - cost) * 0.3;
-        const record = {
-            date: new Date().toISOString().split('T')[0],
-            name, cost, price, isConsignment, profit
-        };
+        const record = { date, name, cost, price, isConsignment, profit };
 
         showLoading(true);
         try {
@@ -321,7 +513,10 @@
                 method: "POST",
                 body: JSON.stringify({ action: "add_finance", data: record })
             });
-            this.reset();
+            // 提交後保留日期，重置其餘欄位
+            document.getElementById('fin-name').value = '';
+            document.getElementById('fin-cost').value = '';
+            document.getElementById('fin-price').value = '';
             await loadAllData();
         } catch (err) {
             alert("上傳帳務失敗");
@@ -330,16 +525,16 @@
         }
     });
 
-    // 【新增】刪除單筆帳務紀錄功能
+    // 刪除單筆帳務
     async function deleteFinanceRow(rowIndex, name) {
-        if (confirm(`確定要刪除「${name}」這筆帳務紀錄嗎？ (此操作不可逆)`)) {
+        if (confirm(`確定要刪除「${name}」這筆帳務紀錄嗎？`)) {
             showLoading(true);
             try {
                 await fetch(API_URL, {
                     method: "POST",
                     body: JSON.stringify({ action: "delete_finance", rowIndex: rowIndex })
                 });
-                await loadAllData(); // 重新載入最新資料
+                await loadAllData();
             } catch (err) {
                 alert("刪除失敗");
             } finally {
@@ -348,49 +543,7 @@
         }
     }
 
-    function renderFinance() {
-    const tbody = document.getElementById('finance-table-body');
-    tbody.innerHTML = '';
-    
-    let totalSets = financeData.length;
-    let totalProfit = 0;
-    let monthProfit = 0;
-    const currentYearMonth = new Date().toISOString().slice(0, 7);
-    document.getElementById('current-month-label').innerText = currentYearMonth;
-
-    // 反轉陣列，讓最新資料顯示在最上面
-    [...financeData].reverse().forEach(item => {
-        // 【修正點】強制將利潤轉為數字，若轉換失敗（非數字）則自動視為 0
-        const currentProfit = Number(item.profit) || 0;
-        
-        totalProfit += currentProfit;
-        const itemDateStr = String(item.date).split('T')[0];
-        if (itemDateStr.startsWith(currentYearMonth)) {
-            monthProfit += currentProfit;
-        }
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${itemDateStr}</td>
-            <td>${item.name}</td>
-            <td>$${Number(item.cost) || 0}</td>
-            <td>$${Number(item.price) || 0}</td>
-            <td>${item.isConsignment}</td>
-            <td style="color: ${currentProfit >= 0 ? 'green' : 'red'}; font-weight:bold;">$${currentProfit.toFixed(1)}</td>
-            <td>
-                <button class="btn-sm-danger" onclick="deleteFinanceRow(${item.rowIndex}, '${item.name}')">刪除</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-
-    // 【修正點】確保在寫入畫面時，統計欄位一定是數字型態
-    document.getElementById('total-sets').innerText = totalSets;
-    document.getElementById('total-profit').innerText = '$' + Number(totalProfit).toFixed(1);
-    document.getElementById('month-profit').innerText = '$' + Number(monthProfit).toFixed(1);
-}
-
-    // 倉儲進貨聯想與登記
+    // 倉儲管理區塊
     const whNameInput = document.getElementById('wh-name');
     const autocompleteList = document.getElementById('autocomplete-list');
 
@@ -450,8 +603,9 @@
         warehouseData.forEach(item => {
             const itemDateStr = String(item.date).split('T')[0];
             const tr = document.createElement('tr');
+            // 【Bug 修正關鍵】：將當前資料行在 Google 試算表中精確的 rowIndex 綁定在屬性 data-row 上
             tr.innerHTML = `
-                <td><input type="checkbox" class="ship-checkbox" value="${item.id}"></td>
+                <td><input type="checkbox" class="ship-checkbox" value="${item.id}" data-row="${item.rowIndex}"></td>
                 <td>${item.name}</td>
                 <td>$${item.cost}</td>
                 <td>${item.status}</td>
@@ -461,7 +615,7 @@
         });
     }
 
-    // 雲端同步出貨
+    // 【Debug 修正完成】雲端批次同步出貨
     async function shipSelected() {
         const checkboxes = document.querySelectorAll('.ship-checkbox:checked');
         if (checkboxes.length === 0) {
@@ -470,12 +624,15 @@
         }
 
         if (confirm(`確定要將這 ${checkboxes.length} 項商品出貨嗎？`)) {
-            const idsToShip = Array.from(checkboxes).map(cb => cb.value);
+            // 精準抓取被勾選商品在 Google 試算表對應的真正的行號 (RowIndex)
+            const rowsToShip = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-row'), 10));
+            
             showLoading(true);
             try {
-                await fetch(API_URL, {
+                // 發送至後端專門處理行刪除的 action
+                const response = await fetch(API_URL, {
                     method: "POST",
-                    body: JSON.stringify({ action: "ship_warehouse", ids: idsToShip })
+                    body: JSON.stringify({ action: "ship_warehouse_by_rows", rowIndexes: rowsToShip })
                 });
                 await loadAllData();
             } catch (err) {
@@ -486,7 +643,7 @@
         }
     }
 
-    // 初始化下載
+    // 初始化讀取
     loadAllData();
 </script>
 
